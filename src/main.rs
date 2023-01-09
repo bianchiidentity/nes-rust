@@ -1,5 +1,4 @@
-pub mod cpu;
-pub mod cpuTest;
+mod cpu;
 
 fn main() {
     println!("Hello, world!");
