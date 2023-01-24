@@ -25,7 +25,7 @@ pub enum AddressingMode {
     NoneAddressing,
 }
 
-trait Mem {
+pub trait Mem {
     fn mem_read(&self, addr: u16) -> u8;
 
     fn mem_write(&mut self, addr: u16, data: u8);
@@ -33,7 +33,7 @@ trait Mem {
     fn mem_read_u16(&self, pos: u16) -> u16 {
         let lo = self.mem_read(pos) as u16;
         let hi = self.mem_read(pos + 1) as u16;
-        (hi << 8) | (lo as u16)
+        (hi << 8) | lo
     }
 
     fn mem_write_u16(&mut self, pos: u16, data: u16) {
@@ -138,6 +138,25 @@ impl CPU {
         self.update_zero_and_negative_flags(self.register_x);
     }
 
+    fn inx(&mut self) {
+        self.register_x = self.register_x.wrapping_add(1);
+        self.update_zero_and_negative_flags(self.register_x);
+    }
+
+    fn ora(&mut self, mode: &AddressingMode) {
+        let addr = self.get_operand_address(mode);
+        let data = self.mem_read(addr);
+        self.set_register_a(data | self.register_a);
+    }
+
+    // ================================================================
+
+    fn set_register_a(&mut self, value: u8) {
+        self.register_a = value;
+        // その後、ZeroとNegativeフラグを更新する
+        self.update_zero_and_negative_flags(self.register_a);
+    }
+
     fn update_zero_and_negative_flags(&mut self, result: u8) {
         if result == 0 {
             self.status = self.status | 0b0000_0010;
@@ -152,11 +171,7 @@ impl CPU {
         }
     }
 
-    fn inx(&mut self) {
-        self.register_x = self.register_x.wrapping_add(1);
-        self.update_zero_and_negative_flags(self.register_x);
-    }
-
+    // ================================================================
     pub fn load_and_run(&mut self, program: Vec<u8>) {
         self.load(program);
         self.reset();
@@ -194,14 +209,18 @@ impl CPU {
                     self.lda(&opcode.mode);
                 }
 
-                /* STA */
                 0x85 | 0x95 | 0x8d | 0x9d | 0x99 | 0x81 | 0x91 => {
                     self.sta(&opcode.mode);
+                }
+                0x01 => {
+                    self.ora(&opcode.mode);
                 }
 
                 0xAA => self.tax(),
                 0xe8 => self.inx(),
+                0xea => {} //do nothing
                 0x00 => return,
+
                 _ => todo!(),
             }
 
