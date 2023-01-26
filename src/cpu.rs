@@ -66,6 +66,73 @@ impl CPU {
         }
     }
 
+    fn lda(&mut self, mode: &AddressingMode) {
+        let addr = self.get_operand_address(&mode);
+        let value = self.mem_read(addr);
+
+        self.register_a = value;
+        self.update_zero_and_negative_flags(self.register_a);
+    }
+
+    fn ldx(&mut self, mode: &AddressingMode) {
+        let addr = self.get_operand_address(mode);
+        let data = self.mem_read(addr);
+        self.register_x = data;
+        self.update_zero_and_negative_flags(self.register_x);
+    }
+
+    fn sta(&mut self, mode: &AddressingMode) {
+        let addr = self.get_operand_address(mode);
+        self.mem_write(addr, self.register_a);
+    }
+
+    fn tax(&mut self) {
+        self.register_x = self.register_a;
+        self.update_zero_and_negative_flags(self.register_x);
+    }
+
+    fn inx(&mut self) {
+        self.register_x = self.register_x.wrapping_add(1);
+        self.update_zero_and_negative_flags(self.register_x);
+    }
+
+    fn ora(&mut self, mode: &AddressingMode) {
+        let addr = self.get_operand_address(mode);
+        let data = self.mem_read(addr);
+        self.set_register_a(data | self.register_a);
+    }
+
+    // ================================================================
+
+    fn set_register_a(&mut self, value: u8) {
+        self.register_a = value;
+        // その後、ZeroとNegativeフラグを更新する
+        self.update_zero_and_negative_flags(self.register_a);
+    }
+
+    fn update_zero_and_negative_flags(&mut self, result: u8) {
+        // 算術論理演算(ADC, SBC, AND, OR, EOR, etc)および
+        // データロード命令 (LDA, LDX, LDY, etc)を実行した後
+        // 結果がゼロにの場合に１にセットされ， ゼロにならなかった場合は０にクリアされる．
+        if result == 0 {
+            self.status = self.status | 0b0000_0010;
+        } else {
+            self.status = self.status & 0b1111_1101;
+        }
+
+        // 演算の結果，bit 7 が１にセットされていれば(符号付では負とされるから)
+        // ネガティブ フラグは１にセットされ，
+        // bit 7 が０であればネガティブフラグは０にクリアされる．
+        // また，BIT 命令を実行するとメモリの bit 7 がネガティブフラグにセットされる．
+        if result & 0b1000_0000 != 0 {
+            self.status = self.status | 0b1000_0000;
+        } else {
+            self.status = self.status & 0b0111_1111;
+        }
+    }
+
+    // ================================================================
+
     fn get_operand_address(&self, mode: &AddressingMode) -> u16 {
         match mode {
             AddressingMode::Immediate => self.program_counter,
@@ -120,58 +187,6 @@ impl CPU {
         }
     }
 
-    fn lda(&mut self, mode: &AddressingMode) {
-        let addr = self.get_operand_address(&mode);
-        let value = self.mem_read(addr);
-
-        self.register_a = value;
-        self.update_zero_and_negative_flags(self.register_a);
-    }
-
-    fn sta(&mut self, mode: &AddressingMode) {
-        let addr = self.get_operand_address(mode);
-        self.mem_write(addr, self.register_a);
-    }
-
-    fn tax(&mut self) {
-        self.register_x = self.register_a;
-        self.update_zero_and_negative_flags(self.register_x);
-    }
-
-    fn inx(&mut self) {
-        self.register_x = self.register_x.wrapping_add(1);
-        self.update_zero_and_negative_flags(self.register_x);
-    }
-
-    fn ora(&mut self, mode: &AddressingMode) {
-        let addr = self.get_operand_address(mode);
-        let data = self.mem_read(addr);
-        self.set_register_a(data | self.register_a);
-    }
-
-    // ================================================================
-
-    fn set_register_a(&mut self, value: u8) {
-        self.register_a = value;
-        // その後、ZeroとNegativeフラグを更新する
-        self.update_zero_and_negative_flags(self.register_a);
-    }
-
-    fn update_zero_and_negative_flags(&mut self, result: u8) {
-        if result == 0 {
-            self.status = self.status | 0b0000_0010;
-        } else {
-            self.status = self.status & 0b1111_1101;
-        }
-
-        if result & 0b1000_0000 != 0 {
-            self.status = self.status | 0b1000_0000;
-        } else {
-            self.status = self.status & 0b0111_1111;
-        }
-    }
-
-    // ================================================================
     pub fn load_and_run(&mut self, program: Vec<u8>) {
         self.load(program);
         self.reset();
@@ -215,7 +230,9 @@ impl CPU {
                 0x01 => {
                     self.ora(&opcode.mode);
                 }
-
+                0xa2 | 0xa6 | 0xb6 => {
+                    self.ldx(&opcode.mode);
+                }
                 0xAA => self.tax(),
                 0xe8 => self.inx(),
                 0xea => {} //do nothing
@@ -238,7 +255,7 @@ mod test {
     #[test]
     fn test_0xa9_lda_immediate_load_data() {
         let mut cpu = CPU::new();
-        cpu.load_and_run(vec![0xa9, 0x05, 0x00]);
+        cpu.load_and_run(vec![0xa9, 0x05]);
         assert_eq!(cpu.register_a, 5);
         assert!(cpu.status & 0b0000_0010 == 0);
         assert!(cpu.status & 0b1000_0000 == 0);
@@ -284,4 +301,37 @@ mod test {
 
         assert_eq!(cpu.register_a, 0x55);
     }
+
+    #[test]
+    fn test_ldx_immediate() {
+        let mut cpu = CPU::new();
+        cpu.load_and_run(vec![0xa2, 0x55]);
+
+        assert_eq!(cpu.register_x, 0x55);
+    }
+
+    #[test]
+    fn test_ldx_zero_page() {
+        let mut cpu = CPU::new();
+        // これzero pageのtestしやすい
+        cpu.mem_write(0x20, 0x55);
+        cpu.load_and_run(vec![0xa6, 0x20]);
+
+        assert_eq!(cpu.register_x, 0x55);
+    }
+
+    // #[test]
+    // fn test_ora() {
+    //     let mut cpu = CPU::new();
+    // // LDX
+    //     cpu.load_and_run(vec![0xa9, 0x05]); // 0000_0101
+    //     assert_eq!(cpu.register_a, 5);
+
+    // // ORA
+    //     cpu.load_and_run(vec![0x01, 0x00]);
+    //     assert_eq!(cpu.register_a, 0x00);
+
+    // assert!(cpu.status & 0b0000_0010 == 1);
+    // assert!(cpu.status & 0b1000_0000 == 0);
+    // }
 }
